@@ -2,6 +2,7 @@
 
 import io
 import queue
+import sys
 import threading
 import tkinter as tk
 
@@ -18,8 +19,12 @@ GREEN = "#1ed760"
 GREEN_HOVER = "#3be477"
 BTN = "#2a2a2a"
 BTN_HOVER = "#3a3a3a"
-FONT = "Segoe UI"
 NEW_PREFIX = "+ New: "
+
+IS_MAC = sys.platform == "darwin"
+FONT = "Helvetica Neue" if IS_MAC else "Segoe UI"
+# Tk on macOS draws 1 point as 1 pixel (Windows: 1.33px), so Mac fonts need bigger numbers to match.
+FONT_SCALE = 4 / 3 if IS_MAC else 1
 
 
 def _enable_dpi_awareness():
@@ -73,6 +78,24 @@ def _restore_foreground(previous_foreground):
         pass
 
 
+def _corner(root, w, h, margin):
+    """Where the pop-up goes: bottom-right above the taskbar on Windows, top-right under the
+    menu bar on Mac (where macOS shows its own notifications)."""
+    if IS_MAC:
+        return root.winfo_screenwidth() - w - margin, 38 + margin
+    right, bottom = _work_area(root)
+    return right - w - margin, bottom - h - margin
+
+
+def _mac_dont_steal_focus(win):
+    """macOS version of WS_EX_NOACTIVATE: a floating window that doesn't take focus (same trick IDLE uses)."""
+    if IS_MAC:
+        try:
+            win.tk.call("::tk::unsupported::MacWindowStyle", "style", win._w, "help", "noActivates")
+        except tk.TclError:
+            pass
+
+
 def _truncate(text, n):
     return text if len(text) <= n else text[: n - 1].rstrip() + "…"
 
@@ -85,7 +108,8 @@ class PopupUI:
         self.root.withdraw()
         self.root.update()
         _restore_foreground(previous_foreground)  # the hidden main window grabs focus on creation
-        self.scale = self.root.winfo_fpixels("1i") / 96
+        # Windows: grow pixel sizes with display scaling. Mac: Retina scaling is automatic.
+        self.scale = 1.0 if IS_MAC else self.root.winfo_fpixels("1i") / 96
         self._calls = queue.Queue()
         self.win = None
         self.uri = None
@@ -120,6 +144,9 @@ class PopupUI:
     def px(self, v):
         return int(v * self.scale)
 
+    def font(self, size, *style):
+        return (FONT, round(size * FONT_SCALE), *style)
+
     def show(self, pick, choices, selected, on_add, timeout=0):
         """
         pick: {"uri", "title", "artist", "reason", "image": bytes or None}
@@ -134,6 +161,7 @@ class PopupUI:
         win = tk.Toplevel(self.root, bg=BORDER)
         self.win = win
         win.overrideredirect(True)
+        _mac_dont_steal_focus(win)
         win.attributes("-topmost", True)
         win.attributes("-alpha", 0.0)
 
@@ -152,37 +180,38 @@ class PopupUI:
         if self._art:
             tk.Label(card, image=self._art, bg=BG, bd=0).grid(row=0, column=0, rowspan=4, sticky="nw", padx=(0, self.px(12)))
 
-        tk.Label(card, text=pick.get("header", "VIBE PICK"), fg=GREEN, bg=BG, font=(FONT, 8, "bold")).grid(row=0, column=1, sticky="w")
-        close = tk.Label(card, text="✕", fg=SUB, bg=BG, font=(FONT, 10), cursor="hand2")
+        tk.Label(card, text=pick.get("header", "VIBE PICK"), fg=GREEN, bg=BG, font=self.font(8, "bold")).grid(row=0, column=1, sticky="w")
+        close = tk.Label(card, text="✕", fg=SUB, bg=BG, font=self.font(10), cursor="hand2")
         close.grid(row=0, column=2, sticky="ne")
         close.bind("<Button-1>", lambda e: self.close())
         close.bind("<Enter>", lambda e: close.config(fg=FG))
         close.bind("<Leave>", lambda e: close.config(fg=SUB))
 
-        tk.Label(card, text=_truncate(pick["title"], 38), fg=FG, bg=BG, font=(FONT, 12, "bold"),
+        tk.Label(card, text=_truncate(pick["title"], 38), fg=FG, bg=BG, font=self.font(12, "bold"),
                  anchor="w").grid(row=1, column=1, columnspan=2, sticky="w")
-        tk.Label(card, text=_truncate(pick["artist"], 44), fg=SUB, bg=BG, font=(FONT, 10),
+        tk.Label(card, text=_truncate(pick["artist"], 44), fg=SUB, bg=BG, font=self.font(10),
                  anchor="w").grid(row=2, column=1, columnspan=2, sticky="w")
         if pick.get("reason"):
-            tk.Label(card, text=_truncate(pick["reason"], 52), fg=SUB, bg=BG, font=(FONT, 8, "italic"),
+            tk.Label(card, text=_truncate(pick["reason"], 52), fg=SUB, bg=BG, font=self.font(8, "italic"),
                      anchor="w").grid(row=3, column=1, columnspan=2, sticky="w")
 
         actions = tk.Frame(card, bg=BG)
         actions.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(self.px(10), 0))
         self._actions = actions
 
-        tk.Label(actions, text="Add to playlist?", fg=FG, bg=BG, font=(FONT, 9)).pack(side="left")
+        tk.Label(actions, text="Add to playlist?", fg=FG, bg=BG, font=self.font(9)).pack(side="left")
 
         var = tk.StringVar(value=selected)
         menu_btn = tk.OptionMenu(actions, var, *choices) if choices else tk.OptionMenu(actions, var, "")
-        menu_btn.config(bg=BTN, fg=FG, activebackground=BTN_HOVER, activeforeground=FG, font=(FONT, 9),
+        menu_btn.config(bg=BTN, fg=FG, activebackground=BTN_HOVER, activeforeground=FG, font=self.font(9),
                         relief="flat", bd=0, highlightthickness=0, width=18, anchor="w", cursor="hand2",
                         indicatoron=True)
         menu_btn["menu"].config(bg=BTN, fg=FG, activebackground=GREEN, activeforeground="#000000",
-                                font=(FONT, 9), bd=0)
+                                font=self.font(9), bd=0)
         menu_btn.pack(side="left", padx=(self.px(8), self.px(6)), ipady=self.px(2))
-        # Windows dropdown menus only close properly if their window has focus; you clicked it, so take it.
-        menu_btn.bind("<ButtonPress-1>", lambda e: win.focus_force(), add=True)
+        if not IS_MAC:
+            # Windows dropdown menus only close properly if their window has focus; you clicked it, so take it.
+            menu_btn.bind("<ButtonPress-1>", lambda e: win.focus_force(), add=True)
 
         no_btn = self._button(actions, "No", BTN, BTN_HOVER, FG, lambda: self.close())
         no_btn.pack(side="right")
@@ -191,10 +220,8 @@ class PopupUI:
         yes_btn.pack(side="right", padx=(0, self.px(6)))
 
         win.update_idletasks()
-        w, h = win.winfo_reqwidth(), win.winfo_reqheight()
-        right, bottom = _work_area(self.root)
-        margin = self.px(16)
-        win.geometry(f"+{right - w - margin}+{bottom - h - margin}")
+        x, y = _corner(self.root, win.winfo_reqwidth(), win.winfo_reqheight(), self.px(16))
+        win.geometry(f"+{x}+{y}")
         win.update()
         _dont_steal_focus(win, previous_foreground)
         self._fade(win, 0.0, 1.0, 0.12)
@@ -203,7 +230,7 @@ class PopupUI:
             win.after(int(timeout * 1000), lambda: self.win is win and not self.busy and self.close())
 
     def _button(self, parent, text, bg, hover, fg, command):
-        b = tk.Label(parent, text=text, bg=bg, fg=fg, font=(FONT, 9, "bold"), cursor="hand2",
+        b = tk.Label(parent, text=text, bg=bg, fg=fg, font=self.font(9, "bold"), cursor="hand2",
                      padx=self.px(14), pady=self.px(4))
         b.bind("<Button-1>", lambda e: command())
         b.bind("<Enter>", lambda e: b.config(bg=hover))
@@ -232,7 +259,7 @@ class PopupUI:
         for child in self._actions.winfo_children():
             child.destroy()
         tk.Label(self._actions, text=_truncate(text, 60), fg=color, bg=BG,
-                 font=(FONT, 9, "bold")).pack(side="left", pady=self.px(4))
+                 font=self.font(9, "bold")).pack(side="left", pady=self.px(4))
 
     def _done(self, win, text):
         self._finish(win, text, GREEN, 2200)

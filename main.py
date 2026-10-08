@@ -256,6 +256,9 @@ def main():
     signal.signal(signal.SIGINT, lambda *_: app.ui.post(app.ui.quit))
     threading.Thread(target=app.loop, daemon=True).start()
     log("Vibe Queue is running. Play something on Spotify. Press Ctrl+C (or close this window) to quit.")
+    which = "every song you listen to" if cfg["ask_about"] == "every_song" else "only the vibe picks"
+    when = {"finished": "when it ends", "playing": "when it starts", "queued": "as soon as a pick is queued"}
+    log(f"Pop-ups: asking about {which}, {when.get(cfg['popup_when'], cfg['popup_when'])}.")
     app.ui.run()
     app.save_state()
 
