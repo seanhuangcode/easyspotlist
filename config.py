@@ -20,7 +20,10 @@ DEFAULTS = {
     # "playing"  = pop-up appears as soon as the pick starts playing.
     # "queued"   = pop-up appears as soon as it's added to the queue.
     "popup_when": "finished",
-    # In "finished" mode, don't ask about a pick you skipped within this many seconds.
+    # "every_song" = the pop-up asks about every song you listen to.
+    # "picks"      = only ask about the songs Vibe Queue found and queued.
+    "ask_about": "every_song",
+    # Don't ask about a song you skipped within this many seconds.
     "min_listen_seconds": 20,
     # Close an unanswered pop-up after this many seconds (0 = keep it until the song changes).
     "popup_timeout_seconds": 0,

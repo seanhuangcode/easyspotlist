@@ -3,12 +3,14 @@
 By **Sean Huang** ([@seanhuangcode](https://github.com/seanhuangcode))
 
 Vibe Queue watches what you're playing on Spotify and finds a song with a similar vibe. It adds
-that song to your queue. When the song has played, a small pop-up asks if you want to save it to
-one of your playlists.
+that song to your queue. After each song you listen to, including the ones it found, a small
+pop-up asks if you want to save it to one of your playlists.
 
 - Similar songs come from Last.fm, favoring artists you're not already listening to
 - It never suggests the same song twice
 - The pop-up doesn't steal focus, and it skips songs you skipped within 20 seconds
+- It won't add a song twice to the same playlist
+- To only be asked about the songs it found, set `"ask_about": "picks"` in `config.json`
 
 ## Setup
 

@@ -73,7 +73,7 @@ class VibeQueue:
         self.ui = None
         self.last_uri = None
         self.pending = self.state.get("pending")  # the pick we queued that hasn't played yet
-        self.playing_pick = None  # (pick, time it started) while a pick is playing
+        self.current = None  # (song, time it started, is it a vibe pick) for the song playing now
         self.songs_since_pick = cfg["suggest_every_n_songs"]  # so the first song gets a pick
         self._playlists = None
         self._playlists_at = 0
@@ -122,21 +122,26 @@ class VibeQueue:
         log(f"Now playing: {describe(track)}")
         self.ui.post(lambda uri=track["uri"]: self.ui.close_unless(uri))
 
-        if self.playing_pick:  # the pick just ended, so ask about it now that you've heard it
-            pick, started = self.playing_pick
-            self.playing_pick = None
-            if self.cfg["popup_when"] == "finished":
-                if time.time() - started >= self.cfg["min_listen_seconds"]:
-                    self.show_popup(pick, just_played=True)
-                else:
-                    log("  You skipped the pick quickly, so not asking about it.")
+        every_song = self.cfg["ask_about"] == "every_song"
+        is_pick = bool(self.pending and self._same_song(track, self.pending))
+        song = self.pending if is_pick else track  # the pick dict remembers which song it was based on
+        previous, self.current = self.current, (song, time.time(), is_pick)
 
-        if self.pending and self._same_song(track, self.pending):
-            pick, self.pending = self.pending, None
-            self.playing_pick = (pick, time.time())
-            if self.cfg["popup_when"] == "playing":
-                self.show_popup(pick)
-            elif self.cfg["popup_when"] == "finished":
+        # The previous song just ended: ask about it now that you've heard it.
+        if previous and self.cfg["popup_when"] == "finished":
+            prev_song, started, prev_is_pick = previous
+            if prev_is_pick or every_song:
+                if time.time() - started >= self.cfg["min_listen_seconds"]:
+                    self.show_popup(prev_song, just_played=True, is_pick=prev_is_pick)
+                else:
+                    log(f"  You skipped {prev_song['name']} quickly, so not asking about it.")
+
+        if self.cfg["popup_when"] == "playing" and (is_pick or every_song):
+            self.show_popup(song, is_pick=is_pick)
+
+        if is_pick:
+            self.pending = None
+            if self.cfg["popup_when"] == "finished":
                 log("  ^ This is the vibe pick. The pop-up will ask about it when the next song starts.")
             return
 
@@ -180,7 +185,7 @@ class VibeQueue:
             self._playlists_at = time.time()
         return self._playlists
 
-    def show_popup(self, pick, just_played=False):
+    def show_popup(self, pick, just_played=False, is_pick=True):
         try:
             playlists = self.playlists()
         except (SpotifyError, requests.RequestException) as e:
@@ -217,26 +222,30 @@ class VibeQueue:
             "uri": pick["uri"],
             "title": pick["name"],
             "artist": ", ".join(a["name"] for a in pick["artists"]),
-            "reason": f"picked because you played {pick.get('vibe_seed', 'a similar song')}",
+            "reason": f"picked because you played {pick.get('vibe_seed', 'a similar song')}" if is_pick else "",
             "image": image,
-            "header": "VIBE PICK  ·  JUST PLAYED" if just_played else "VIBE PICK",
+            "header": "  ·  ".join((["VIBE PICK"] if is_pick else []) + (["JUST PLAYED"] if just_played else []))
+                      or "NOW PLAYING",
         }
         on_add = lambda label: self.add_to_playlist(pick, options, label)
         self.ui.post(lambda: self.ui.show(data, list(options), selected, on_add, self.cfg["popup_timeout_seconds"]))
 
     def add_to_playlist(self, pick, options, label):
-        """Called from the pop-up's background thread when you click Yes."""
+        """Called from the pop-up's background thread when you click Yes. Returns the message to show."""
         playlist = options.get(label)
         if playlist is None:
             playlist = self.sp.create_playlist(label[len(NEW_PREFIX):])
             log(f"Created playlist: {playlist['name']}")
             if self._playlists is not None:
                 self._playlists.insert(0, playlist)
+        elif self.sp.playlist_has(playlist["id"], pick["uri"]):
+            log(f"{describe(pick)} is already in {playlist['name']}")
+            return f"Already in {playlist['name']}"
         self.sp.add_to_playlist(playlist["id"], pick["uri"])
         self.state["last_playlist_id"] = playlist["id"]
         self.save_state()
         log(f"Added {describe(pick)} to {playlist['name']}")
-        return playlist["name"]
+        return f"✓  Added to {playlist['name']}"
 
 
 def main():

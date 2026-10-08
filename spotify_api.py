@@ -190,6 +190,19 @@ class Spotify:
         })
         return {"id": p["id"], "name": p["name"]}
 
+    def playlist_has(self, playlist_id, uri, max_items=3000):
+        offset = 0
+        while offset < max_items:
+            page = self._call("GET", f"/playlists/{playlist_id}/items", params={"limit": 50, "offset": offset})
+            for entry in page.get("items", []):
+                song = (entry or {}).get("item") or (entry or {}).get("track")  # "track" before Feb 2026
+                if song and song.get("uri") == uri:
+                    return True
+            if not page.get("next"):
+                return False
+            offset += 50
+        return False
+
     def add_to_playlist(self, playlist_id, uri):
         self._call("POST", f"/playlists/{playlist_id}/items", json={"uris": [uri]})
 

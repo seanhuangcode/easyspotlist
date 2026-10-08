@@ -124,7 +124,7 @@ class PopupUI:
         """
         pick: {"uri", "title", "artist", "reason", "image": bytes or None}
         choices: playlist names for the dropdown; selected: the one pre-selected.
-        on_add(choice) -> playlist name. Runs on a background thread; raise to report an error.
+        on_add(choice) -> message to show. Runs on a background thread; raise to report an error.
         """
         self.close(fade=False)
         self.uri = pick["uri"]
@@ -163,8 +163,9 @@ class PopupUI:
                  anchor="w").grid(row=1, column=1, columnspan=2, sticky="w")
         tk.Label(card, text=_truncate(pick["artist"], 44), fg=SUB, bg=BG, font=(FONT, 10),
                  anchor="w").grid(row=2, column=1, columnspan=2, sticky="w")
-        tk.Label(card, text=_truncate(pick["reason"], 52), fg=SUB, bg=BG, font=(FONT, 8, "italic"),
-                 anchor="w").grid(row=3, column=1, columnspan=2, sticky="w")
+        if pick.get("reason"):
+            tk.Label(card, text=_truncate(pick["reason"], 52), fg=SUB, bg=BG, font=(FONT, 8, "italic"),
+                     anchor="w").grid(row=3, column=1, columnspan=2, sticky="w")
 
         actions = tk.Frame(card, bg=BG)
         actions.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(self.px(10), 0))
@@ -217,8 +218,8 @@ class PopupUI:
 
         def work():
             try:
-                name = on_add(choice)
-                self.post(lambda: self._done(win, f"✓  Added to {name}"))
+                msg = on_add(choice)
+                self.post(lambda: self._done(win, msg))
             except Exception as e:
                 msg = f"Couldn't add it: {e}"
                 self.post(lambda: self._failed(win, msg))
