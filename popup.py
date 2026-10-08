@@ -1,6 +1,7 @@
 """The little always-on-top pop-up in the corner of the screen."""
 
 import io
+import os
 import queue
 import sys
 import threading
@@ -10,6 +11,13 @@ try:
     from PIL import Image, ImageTk
 except ImportError:  # album art is optional
     Image = None
+
+NSApplication = NSWorkspace = None
+if sys.platform == "darwin":
+    try:  # pyobjc: hides the Dock icon and hands focus back (optional, installed by requirements.txt)
+        from AppKit import NSApplication, NSWorkspace
+    except ImportError:
+        pass
 
 BG = "#181818"
 BORDER = "#333333"
@@ -48,6 +56,9 @@ def _work_area(root):
 
 
 def _foreground_window():
+    """The window (Windows) or app (Mac) you're using right now, so focus can be handed back."""
+    if IS_MAC:
+        return NSWorkspace.sharedWorkspace().frontmostApplication() if NSWorkspace else None
     try:
         import ctypes
         return ctypes.windll.user32.GetForegroundWindow()
@@ -70,6 +81,15 @@ def _dont_steal_focus(win, previous_foreground):
 
 
 def _restore_foreground(previous_foreground):
+    if IS_MAC:
+        try:
+            front = NSWorkspace.sharedWorkspace().frontmostApplication() if NSWorkspace else None
+            me = os.getpid()
+            if previous_foreground and front and front.processIdentifier() == me != previous_foreground.processIdentifier():
+                previous_foreground.activateWithOptions_(0)
+        except Exception:
+            pass
+        return
     try:
         import ctypes
         if previous_foreground and ctypes.windll.user32.GetForegroundWindow() != previous_foreground:
@@ -106,6 +126,9 @@ class PopupUI:
         previous_foreground = _foreground_window()
         self.root = tk.Tk()
         self.root.withdraw()
+        if NSApplication:
+            # Run as a background helper: no Dock icon, and no "Python" taking over the menu bar.
+            NSApplication.sharedApplication().setActivationPolicy_(1)  # NSApplicationActivationPolicyAccessory
         self.root.update()
         _restore_foreground(previous_foreground)  # the hidden main window grabs focus on creation
         # Windows: grow pixel sizes with display scaling. Mac: Retina scaling is automatic.
@@ -203,11 +226,12 @@ class PopupUI:
 
         var = tk.StringVar(value=selected)
         menu_btn = tk.OptionMenu(actions, var, *choices) if choices else tk.OptionMenu(actions, var, "")
-        menu_btn.config(bg=BTN, fg=FG, activebackground=BTN_HOVER, activeforeground=FG, font=self.font(9),
-                        relief="flat", bd=0, highlightthickness=0, width=18, anchor="w", cursor="hand2",
-                        indicatoron=True)
-        menu_btn["menu"].config(bg=BTN, fg=FG, activebackground=GREEN, activeforeground="#000000",
-                                font=self.font(9), bd=0)
+        menu_btn.config(font=self.font(9), width=18, anchor="w", cursor="hand2", indicatoron=True)
+        if not IS_MAC:  # Mac draws a native white dropdown and ignores colors, so only theme it on Windows
+            menu_btn.config(bg=BTN, fg=FG, activebackground=BTN_HOVER, activeforeground=FG,
+                            relief="flat", bd=0, highlightthickness=0)
+            menu_btn["menu"].config(bg=BTN, fg=FG, activebackground=GREEN, activeforeground="#000000",
+                                    font=self.font(9), bd=0)
         menu_btn.pack(side="left", padx=(self.px(8), self.px(6)), ipady=self.px(2))
         if not IS_MAC:
             # Windows dropdown menus only close properly if their window has focus; you clicked it, so take it.
@@ -224,6 +248,9 @@ class PopupUI:
         win.geometry(f"+{x}+{y}")
         win.update()
         _dont_steal_focus(win, previous_foreground)
+        if IS_MAC:  # macOS can activate the app a moment after the window appears; hand focus back then too
+            for ms in (100, 300, 700):
+                win.after(ms, lambda: _restore_foreground(previous_foreground))
         self._fade(win, 0.0, 1.0, 0.12)
 
         if timeout:
